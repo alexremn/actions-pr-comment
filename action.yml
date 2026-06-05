@@ -1,0 +1,47 @@
+name: actions-pr-comment
+description: Create, update, or delete pull request comments from GitHub Actions.
+author: Aleksandr Remniov <alexremn>
+runs:
+  using: node24
+  main: dist/index.js
+  post: dist/cleanup/index.js
+branding:
+  icon: message-circle
+  color: blue
+
+inputs:
+  message:
+    description: Comment body. Exactly one of `message` or `file-path` is required (except `delete`).
+    required: false
+  file-path:
+    description: Path to a file whose contents become the comment body.
+    required: false
+  github-token:
+    description: GitHub token used to read and write comments.
+    required: false
+    default: ${{ github.token }}
+  reactions:
+    description: Comma-separated reactions to add (+1,-1,laugh,confused,heart,hooray,rocket,eyes).
+    required: false
+  pr-number:
+    description: Target pull request number. Defaults to the PR/issue from the event context.
+    required: false
+  comment-tag:
+    description: Hidden identifier used to find, update, or delete a previous comment.
+    required: false
+  mode:
+    description: One of upsert, recreate, delete, delete-on-completion.
+    required: false
+    default: upsert
+  create-if-not-exists:
+    description: Create a comment when the tag is not found (upsert / delete-on-completion).
+    required: false
+    default: "true"
+
+outputs:
+  id:
+    description: The comment id.
+  body:
+    description: The final comment body.
+  html-url:
+    description: The comment URL.

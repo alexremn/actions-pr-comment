@@ -1,0 +1,19 @@
+name: Bug report
+description: Report a problem with the action
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow snippet
+      description: The step configuration that reproduces the issue.
+      render: yaml
+    validations:
+      required: false
