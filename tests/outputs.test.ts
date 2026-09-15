@@ -1,7 +1,9 @@
-import * as core from "@actions/core";
-import { setOutputs } from "../src/outputs";
+import { jest } from "@jest/globals";
+import * as core from "./fixtures/core.js";
 
-jest.mock("@actions/core");
+jest.unstable_mockModule("@actions/core", () => core);
+
+const { setOutputs } = await import("../src/outputs.js");
 
 describe("setOutputs", () => {
   it("sets id, body and html-url when a result exists", () => {

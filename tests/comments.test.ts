@@ -1,5 +1,6 @@
-import { createCommentsApi } from "../src/comments";
-import { Target } from "../src/context";
+import { jest } from "@jest/globals";
+import { createCommentsApi } from "../src/comments.js";
+import { Target } from "../src/context.js";
 
 const target: Target = { owner: "o", repo: "r", issueNumber: 5 };
 

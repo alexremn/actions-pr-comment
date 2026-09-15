@@ -1,4 +1,4 @@
-import { resolveTarget } from "../src/context";
+import { resolveTarget } from "../src/context.js";
 
 const ctx = (issueNumber?: number) => ({
   repo: { owner: "o", repo: "r" },

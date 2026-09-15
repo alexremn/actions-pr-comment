@@ -1,4 +1,4 @@
-import { appendTag, hasTag, buildMarker } from "../src/tag";
+import { appendTag, hasTag, buildMarker } from "../src/tag.js";
 
 describe("tag", () => {
   it("builds a stable hidden marker", () => {

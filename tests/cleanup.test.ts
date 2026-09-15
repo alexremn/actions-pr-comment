@@ -1,21 +1,22 @@
-import * as core from "@actions/core";
+import { jest } from "@jest/globals";
+import * as core from "./fixtures/core.js";
 
-jest.mock("@actions/core");
-jest.mock("@actions/github", () => ({
+const remove = jest.fn<(id: number) => Promise<void>>();
+const readCommentId = jest.fn<() => number | null>();
+
+jest.unstable_mockModule("@actions/core", () => core);
+jest.unstable_mockModule("@actions/github", () => ({
   getOctokit: jest.fn(() => ({})),
   context: { repo: { owner: "o", repo: "r" }, issue: { number: 5 }, payload: {} },
 }));
+jest.unstable_mockModule("../src/comments.js", () => ({ createCommentsApi: () => ({ remove }) }));
+jest.unstable_mockModule("../src/state.js", () => ({ readCommentId }));
 
-const remove = jest.fn();
-const readCommentId = jest.fn();
-jest.mock("../src/comments", () => ({ createCommentsApi: () => ({ remove }) }));
-jest.mock("../src/state", () => ({ readCommentId: () => readCommentId() }));
-
-import { cleanup } from "../src/cleanup";
+const { cleanup } = await import("../src/cleanup.js");
 
 describe("cleanup", () => {
   it("removes the tracked comment when state has an id", async () => {
-    (core.getInput as jest.Mock).mockReturnValue("token");
+    core.getInput.mockReturnValue("token");
     readCommentId.mockReturnValue(7);
     await cleanup();
     expect(remove).toHaveBeenCalledWith(7);
@@ -28,7 +29,7 @@ describe("cleanup", () => {
   });
 
   it("never throws if removal fails", async () => {
-    (core.getInput as jest.Mock).mockReturnValue("token");
+    core.getInput.mockReturnValue("token");
     readCommentId.mockReturnValue(7);
     remove.mockRejectedValueOnce(new Error("gone"));
     await expect(cleanup()).resolves.toBeUndefined();

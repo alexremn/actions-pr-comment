@@ -1,4 +1,4 @@
-import { parseConfig, VALID_REACTIONS } from "../src/config";
+import { parseConfig, VALID_REACTIONS } from "../src/config.js";
 
 function withInputs(inputs: Record<string, string>, fn: () => void) {
   const prev = { ...process.env };

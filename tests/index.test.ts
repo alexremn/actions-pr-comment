@@ -1,28 +1,37 @@
-import * as core from "@actions/core";
+import { jest } from "@jest/globals";
+import * as core from "./fixtures/core.js";
+import type { Config } from "../src/config.js";
+import type { ModeResult } from "../src/modes.js";
 
-jest.mock("@actions/core");
-jest.mock("@actions/github", () => ({
+const runMode = jest.fn<() => Promise<ModeResult | null>>();
+const setOutputs = jest.fn();
+const saveCommentId = jest.fn();
+const parseConfig = jest.fn<() => Config>();
+
+jest.unstable_mockModule("@actions/core", () => core);
+jest.unstable_mockModule("@actions/github", () => ({
   getOctokit: jest.fn(() => ({})),
   context: { repo: { owner: "o", repo: "r" }, issue: { number: 5 }, payload: {} },
 }));
+jest.unstable_mockModule("../src/modes.js", () => ({ runMode }));
+jest.unstable_mockModule("../src/outputs.js", () => ({ setOutputs }));
+jest.unstable_mockModule("../src/state.js", () => ({ saveCommentId }));
+jest.unstable_mockModule("../src/comments.js", () => ({ createCommentsApi: jest.fn(() => ({})) }));
+jest.unstable_mockModule("../src/config.js", () => ({ parseConfig }));
 
-const runMode = jest.fn();
-const setOutputs = jest.fn();
-const saveCommentId = jest.fn();
-const createCommentsApi = jest.fn(() => ({}));
-const parseConfig = jest.fn();
+const { run } = await import("../src/index.js");
 
-jest.mock("../src/modes", () => ({ runMode: (...a: any[]) => runMode(...a) }));
-jest.mock("../src/outputs", () => ({ setOutputs: (...a: any[]) => setOutputs(...a) }));
-jest.mock("../src/state", () => ({ saveCommentId: (...a: any[]) => saveCommentId(...a) }));
-jest.mock("../src/comments", () => ({ createCommentsApi: (...a: any[]) => (createCommentsApi as any)(...a) }));
-jest.mock("../src/config", () => ({ parseConfig: () => parseConfig() }));
-
-import { run } from "../src/index";
+const config: Config = {
+  token: "t",
+  body: "b",
+  reactions: [],
+  mode: "delete-on-completion",
+  createIfNotExists: true,
+};
 
 describe("run", () => {
   it("saves state for delete-on-completion results", async () => {
-    parseConfig.mockReturnValue({ token: "t", mode: "delete-on-completion", prNumber: undefined });
+    parseConfig.mockReturnValue(config);
     runMode.mockResolvedValue({ id: 7, body: "b", htmlUrl: "u" });
     await run();
     expect(setOutputs).toHaveBeenCalledWith({ id: 7, body: "b", htmlUrl: "u" });
@@ -36,7 +45,7 @@ describe("run", () => {
   });
 
   it("does not save state when result is null", async () => {
-    parseConfig.mockReturnValue({ token: "t", mode: "delete-on-completion", prNumber: undefined });
+    parseConfig.mockReturnValue(config);
     runMode.mockResolvedValue(null);
     await run();
     expect(saveCommentId).not.toHaveBeenCalled();

@@ -2,19 +2,23 @@
   "name": "actions-pr-comment",
   "version": "1.0.0",
   "description": "Create, update, or delete pull request comments from GitHub Actions.",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/index.ts -o dist --minify && ncc build src/cleanup.ts -o dist/cleanup --minify",
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules NODE_NO_WARNINGS=1 jest",
     "typecheck": "tsc --noEmit"
   },
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1"
   },
   "devDependencies": {
+    "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^26.5.0",
     "@vercel/ncc": "^0.45.0",

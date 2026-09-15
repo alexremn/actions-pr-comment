@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
-import { Config } from "./config";
-import { CommentsApi } from "./comments";
-import { appendTag } from "./tag";
+import { Config } from "./config.js";
+import { CommentsApi } from "./comments.js";
+import { appendTag } from "./tag.js";
 
 export interface ModeResult {
   id: number;

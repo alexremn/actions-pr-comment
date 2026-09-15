@@ -1,4 +1,6 @@
-import type { Context } from "@actions/github/lib/context";
+import type { context } from "@actions/github";
+
+type Context = typeof context;
 
 export interface Target {
   owner: string;

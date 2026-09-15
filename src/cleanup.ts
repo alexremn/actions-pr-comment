@@ -1,8 +1,8 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { createCommentsApi } from "./comments";
-import { resolveTarget } from "./context";
-import { readCommentId } from "./state";
+import { createCommentsApi } from "./comments.js";
+import { resolveTarget } from "./context.js";
+import { readCommentId } from "./state.js";
 
 export async function cleanup(): Promise<void> {
   const id = readCommentId();

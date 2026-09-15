@@ -1,7 +1,7 @@
-import type { GitHub } from "@actions/github/lib/utils";
-import { Target } from "./context";
-import { hasTag } from "./tag";
-import { Reaction } from "./config";
+import type { getOctokit } from "@actions/github";
+import { Target } from "./context.js";
+import { hasTag } from "./tag.js";
+import { Reaction } from "./config.js";
 
 export interface CommentRef {
   id: number;
@@ -17,7 +17,7 @@ export interface CommentsApi {
   addReactions(id: number, reactions: Reaction[]): Promise<void>;
 }
 
-type Octokit = InstanceType<typeof GitHub>;
+type Octokit = ReturnType<typeof getOctokit>;
 
 function toRef(data: { id: number; body?: string | null; html_url: string }): CommentRef {
   return { id: data.id, body: data.body ?? "", htmlUrl: data.html_url };

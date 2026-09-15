@@ -1,7 +1,9 @@
-import * as core from "@actions/core";
-import { saveCommentId, readCommentId } from "../src/state";
+import { jest } from "@jest/globals";
+import * as core from "./fixtures/core.js";
 
-jest.mock("@actions/core");
+jest.unstable_mockModule("@actions/core", () => core);
+
+const { saveCommentId, readCommentId } = await import("../src/state.js");
 
 describe("state", () => {
   it("saves the comment id as a string", () => {
@@ -10,12 +12,12 @@ describe("state", () => {
   });
 
   it("reads back a numeric id", () => {
-    (core.getState as jest.Mock).mockReturnValue("42");
+    core.getState.mockReturnValue("42");
     expect(readCommentId()).toBe(42);
   });
 
   it("returns null when no state is set", () => {
-    (core.getState as jest.Mock).mockReturnValue("");
+    core.getState.mockReturnValue("");
     expect(readCommentId()).toBeNull();
   });
 });

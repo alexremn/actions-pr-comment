@@ -1,11 +1,11 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { parseConfig } from "./config";
-import { resolveTarget } from "./context";
-import { createCommentsApi } from "./comments";
-import { runMode } from "./modes";
-import { setOutputs } from "./outputs";
-import { saveCommentId } from "./state";
+import { parseConfig } from "./config.js";
+import { resolveTarget } from "./context.js";
+import { createCommentsApi } from "./comments.js";
+import { runMode } from "./modes.js";
+import { setOutputs } from "./outputs.js";
+import { saveCommentId } from "./state.js";
 
 export async function run(): Promise<void> {
   try {

@@ -1,8 +1,11 @@
-import { runMode } from "../src/modes";
-import { Config, Reaction } from "../src/config";
-import { CommentsApi, CommentRef } from "../src/comments";
+import { jest } from "@jest/globals";
+import * as core from "./fixtures/core.js";
+import type { Config, Reaction } from "../src/config.js";
+import type { CommentsApi, CommentRef } from "../src/comments.js";
 
-jest.mock("@actions/core");
+jest.unstable_mockModule("@actions/core", () => core);
+
+const { runMode } = await import("../src/modes.js");
 
 function baseConfig(over: Partial<Config> = {}): Config {
   return {
@@ -83,6 +86,7 @@ describe("runMode", () => {
     const api = fakeApi(null);
     const res = await runMode(baseConfig({ mode: "delete", body: "", commentTag: undefined }), api);
     expect(api.remove).not.toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalled();
     expect(res).toBeNull();
   });
 });

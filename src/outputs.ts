@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { ModeResult } from "./modes";
+import { ModeResult } from "./modes.js";
 
 export function setOutputs(result: ModeResult | null): void {
   if (!result) return;
