@@ -3,6 +3,10 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule: { interval: weekly }
+    ignore:
+      # TS 7 (native) has no JS compiler API; ts-jest and ncc still need it.
+      - dependency-name: typescript
+        versions: [">=7"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule: { interval: weekly }
