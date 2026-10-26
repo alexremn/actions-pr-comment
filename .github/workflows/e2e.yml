@@ -1,33 +1,60 @@
 name: E2E
 
-# Manual smoke test of `main` against the real GitHub API, run before tagging a release.
-# It grants only the permission the README asks users for. To also check that planted tags
-# are ignored, first post a comment containing `<!-- actions-pr-comment:e2e -->` on the PR
-# from another account; it must survive the run untouched.
+# Smoke test against the real GitHub API on Linux, macOS and Windows runners. It tests the
+# checked-out code: the dispatched branch, or the tag when the Release workflow calls it.
+# Besides checkout it grants only the permission the README asks users for. To also check
+# that planted tags are ignored, first post a comment containing
+# `<!-- actions-pr-comment:e2e-ubuntu-latest -->` on the PR from another account; it must
+# survive the run untouched.
 on:
   workflow_dispatch:
     inputs:
       pr-number:
         description: Pull request to comment on (open or closed)
         required: true
+  workflow_call:
+    inputs:
+      pr-number:
+        type: string
+        required: true
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Runs share the PR and per-OS tag, and now remove each other's "duplicates"; never overlap them.
+    concurrency:
+      group: e2e-pr${{ inputs.pr-number }}-${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     env:
       GH_TOKEN: ${{ github.token }}
       COMMENTS: repos/${{ github.repository }}/issues/comments
+      TAG: e2e-${{ matrix.os }}
     steps:
-      - name: Create
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Write the comment body file
+        run: |
+          printf 'e2e run %s on %s: created from a file\n' "$GITHUB_RUN_ID" "$RUNNER_OS" > e2e-body.md
+
+      - name: Create from a file
         id: create
-        uses: alexremn/actions-pr-comment@main
+        uses: ./
         with:
           pr-number: ${{ inputs.pr-number }}
-          comment-tag: e2e
-          message: "e2e run ${{ github.run_id }}: created"
+          comment-tag: ${{ env.TAG }}
+          file-path: e2e-body.md
 
       - name: Check the comment is the bot's own
         env:
@@ -36,11 +63,11 @@ jobs:
 
       - name: Update
         id: update
-        uses: alexremn/actions-pr-comment@main
+        uses: ./
         with:
           pr-number: ${{ inputs.pr-number }}
-          comment-tag: e2e
-          message: "e2e run ${{ github.run_id }}: updated"
+          comment-tag: ${{ env.TAG }}
+          message: "e2e run ${{ github.run_id }} on ${{ runner.os }}: updated"
           reactions: rocket
 
       - name: Check the same comment was updated
@@ -50,10 +77,10 @@ jobs:
         run: test -n "$CREATED" && test "$CREATED" = "$UPDATED"
 
       - name: Delete
-        uses: alexremn/actions-pr-comment@main
+        uses: ./
         with:
           pr-number: ${{ inputs.pr-number }}
-          comment-tag: e2e
+          comment-tag: ${{ env.TAG }}
           mode: delete
 
       - name: Check the comment is gone
