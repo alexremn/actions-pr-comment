@@ -1,0 +1,65 @@
+name: E2E
+
+# Manual smoke test of `main` against the real GitHub API, run before tagging a release.
+# It grants only the permission the README asks users for. To also check that planted tags
+# are ignored, first post a comment containing `<!-- actions-pr-comment:e2e -->` on the PR
+# from another account; it must survive the run untouched.
+on:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request to comment on (open or closed)
+        required: true
+
+permissions:
+  pull-requests: write
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMMENTS: repos/${{ github.repository }}/issues/comments
+    steps:
+      - name: Create
+        id: create
+        uses: alexremn/actions-pr-comment@main
+        with:
+          pr-number: ${{ inputs.pr-number }}
+          comment-tag: e2e
+          message: "e2e run ${{ github.run_id }}: created"
+
+      - name: Check the comment is the bot's own
+        env:
+          ID: ${{ steps.create.outputs.id }}
+        run: test "$(gh api "$COMMENTS/$ID" --jq .user.login)" = "github-actions[bot]"
+
+      - name: Update
+        id: update
+        uses: alexremn/actions-pr-comment@main
+        with:
+          pr-number: ${{ inputs.pr-number }}
+          comment-tag: e2e
+          message: "e2e run ${{ github.run_id }}: updated"
+          reactions: rocket
+
+      - name: Check the same comment was updated
+        env:
+          CREATED: ${{ steps.create.outputs.id }}
+          UPDATED: ${{ steps.update.outputs.id }}
+        run: test -n "$CREATED" && test "$CREATED" = "$UPDATED"
+
+      - name: Delete
+        uses: alexremn/actions-pr-comment@main
+        with:
+          pr-number: ${{ inputs.pr-number }}
+          comment-tag: e2e
+          mode: delete
+
+      - name: Check the comment is gone
+        env:
+          ID: ${{ steps.create.outputs.id }}
+        # The default shell runs with pipefail and gh exits 1 on 404, so don't pipe it.
+        run: |
+          out=$(gh api "$COMMENTS/$ID" 2>&1) && { echo "::error::comment $ID still exists"; exit 1; }
+          grep -q "HTTP 404" <<<"$out"
