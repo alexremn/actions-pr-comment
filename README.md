@@ -27,12 +27,12 @@ jobs:
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `message` | Conditional | — | Comment body. Exactly one of `message` or `file-path` is required (except `delete` mode, which needs neither). |
+| `message` | Conditional | — | Comment body. Exactly one of `message` or `file-path` is required (except `delete` mode, which needs neither). Bodies over GitHub's limit of 262,144 bytes are truncated with a notice and a warning. |
 | `file-path` | Conditional | — | Path to a file whose contents become the comment body. The file must not be a symbolic link, and inside the workspace no directory on its path may be one either. |
 | `github-token` | No | `${{ github.token }}` | GitHub token used to read and write comments. |
 | `reactions` | No | — | Comma-separated reactions to add to the comment. Allowed values: `+1`, `-1`, `laugh`, `confused`, `heart`, `hooray`, `rocket`, `eyes`. |
 | `pr-number` | No | Event context | Target pull request number (positive integer). Defaults to the PR/issue number from the triggering event. |
-| `comment-tag` | No | — | Hidden identifier (`<!-- actions-pr-comment:TAG -->`) embedded in the comment to find, update, or delete a previous comment. Only comments written by the same account as `github-token` are matched, so a tag planted by someone else is ignored. Must not contain `-->`. |
+| `comment-tag` | No | — | Hidden identifier (`<!-- actions-pr-comment:TAG -->`) embedded in the comment to find, update, or delete a previous comment. Only comments written by the same account as `github-token` are matched, so a tag planted by someone else is ignored. The marker must be the last thing in the comment, which is how the action writes it, so a comment that merely mentions the marker is never touched. Markers that appear inside the body text itself are neutralized, so a body cannot claim another tag. Must not contain `-->`. |
 | `mode` | No | `upsert` | One of `upsert`, `recreate`, `delete`, `delete-on-completion`. |
 | `create-if-not-exists` | No | `true` | When the tagged comment is not found, create it (applies to `upsert` and `delete-on-completion`). `true` or `false`, case-insensitive; any other value is treated as `false` with a warning. |
 
@@ -44,7 +44,24 @@ jobs:
 | `body` | The final comment body. |
 | `html-url` | The URL of the comment on GitHub. |
 
+The `body` output can contain untrusted text, such as a PR title included in the message. Pass it to scripts through `env:` and never interpolate `${{ steps.<id>.outputs.body }}` directly into a `run:` command:
+
+```yaml
+- run: echo "$BODY" > comment.md
+  env:
+    BODY: ${{ steps.comment.outputs.body }}
+```
+
 ## Modes
+
+If parallel runs each create the comment, there can be more than one with the same tag. `upsert` and `delete-on-completion` then update the oldest one and remove the others, while `recreate` and `delete` remove all of them. To avoid parallel runs racing in the first place, give the workflow a concurrency group per pull request:
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+```
+
+Without one, a run's outputs can point at a comment that a parallel run then removes as a duplicate.
 
 ### upsert
 
@@ -60,7 +77,7 @@ Finds the tagged comment and updates it in place. If no tagged comment exists an
 
 ### recreate
 
-Deletes the existing tagged comment (if found) and posts a fresh one. Use this when you want a clean comment rather than an in-place edit, for example to reset the position in the comment thread.
+Deletes the existing tagged comment (and any duplicates) and posts a fresh one. Use this when you want a clean comment rather than an in-place edit, for example to reset the position in the comment thread.
 
 ```yaml
 - uses: alexremn/actions-pr-comment@v1
@@ -72,7 +89,7 @@ Deletes the existing tagged comment (if found) and posts a fresh one. Use this w
 
 ### delete
 
-Deletes the tagged comment. If no matching comment is found, the step is a no-op. No `message` or `file-path` is needed.
+Deletes the tagged comment, including any duplicates. If no matching comment is found, the step is a no-op. No `message` or `file-path` is needed.
 
 ```yaml
 - uses: alexremn/actions-pr-comment@v1

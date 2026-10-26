@@ -10,7 +10,7 @@ export interface CommentRef {
 }
 
 export interface CommentsApi {
-  find(tag: string): Promise<CommentRef | null>;
+  findAll(tag: string): Promise<CommentRef[]>;
   create(body: string): Promise<CommentRef>;
   update(id: number, body: string): Promise<CommentRef>;
   remove(id: number): Promise<void>;
@@ -46,20 +46,22 @@ export function createCommentsApi(octokit: Octokit, target: Target): CommentsApi
   const base = { owner: target.owner, repo: target.repo };
 
   return {
-    async find(tag) {
+    // Every tagged comment this token's account wrote, oldest first. All of them, not just the
+    // first, so parallel runs that each created one can be cleaned up.
+    async findAll(tag) {
       const all = await octokit.paginate(octokit.rest.issues.listComments, {
         ...base,
         issue_number: target.issueNumber,
         per_page: 100,
       });
       const tagged = all.filter((c) => c.body != null && hasTag(c.body, tag));
+      const authored: CommentRef[] = [];
       for (let i = 0; i < tagged.length; i += MAX_NODES_PER_QUERY) {
         const batch = tagged.slice(i, i + MAX_NODES_PER_QUERY);
         const nodes = await queryAuthored(octokit, batch.map((c) => c.node_id));
-        const index = nodes.findIndex((n) => n?.viewerDidAuthor);
-        if (index !== -1) return toRef(batch[index]);
+        authored.push(...batch.filter((_, j) => nodes[j]?.viewerDidAuthor).map(toRef));
       }
-      return null;
+      return authored;
     },
     async create(body) {
       const { data } = await octokit.rest.issues.createComment({
@@ -78,7 +80,12 @@ export function createCommentsApi(octokit: Octokit, target: Target): CommentsApi
       return toRef(data);
     },
     async remove(id) {
-      await octokit.rest.issues.deleteComment({ ...base, comment_id: id });
+      try {
+        await octokit.rest.issues.deleteComment({ ...base, comment_id: id });
+      } catch (err) {
+        // Already gone, e.g. removed by a parallel run: the goal is met.
+        if ((err as { status?: number } | null)?.status !== 404) throw err;
+      }
     },
     async addReactions(id, reactions) {
       for (const content of reactions) {

@@ -24,7 +24,8 @@ interface Call {
 let calls: Call[] = [];
 // `mine: false` marks a comment some other account wrote (viewerDidAuthor false); `"deleted"` one
 // that is listed but gone by the time GraphQL is asked (null node + NOT_FOUND, like GitHub).
-let existing: { id: number; body: string; mine?: boolean | "deleted" }[] = [];
+// `goneOnDelete` makes DELETE answer 404, as when a parallel run removed it first.
+let existing: { id: number; body: string; mine?: boolean | "deleted"; goneOnDelete?: boolean }[] = [];
 // Makes GraphQL refuse every node, like a token without access.
 let graphqlForbidden = false;
 let server: http.Server;
@@ -54,7 +55,9 @@ function respond(req: http.IncomingMessage, res: http.ServerResponse, raw: strin
   if (call.method === "POST" && call.url.endsWith("/reactions")) return send(201, { id: 1, content: call.body?.content });
   if (call.method === "POST") return send(201, { id: 100, body: call.body?.body, html_url: "https://gh/c/100" });
   if (call.method === "PATCH") return send(200, { id, body: call.body?.body, html_url: `https://gh/c/${id}` });
-  if (call.method === "DELETE") return send(204);
+  if (call.method === "DELETE") {
+    return existing.find((c) => c.id === id)?.goneOnDelete ? send(404, { message: "Not Found" }) : send(204);
+  }
   send(404, { message: "Not Found" });
 }
 
@@ -87,8 +90,10 @@ const baseInputs = { "github-token": "tok", mode: "upsert", "create-if-not-exist
 
 beforeAll(async () => {
   server = http.createServer((req, res) => {
+    // Decode as a stream: concatenating raw chunks would split multi-byte characters at chunk edges.
+    req.setEncoding("utf8");
     let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
+    req.on("data", (chunk: string) => (raw += chunk));
     req.on("end", () => respond(req, res, raw));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -188,6 +193,54 @@ describe("dist bundles", () => {
     expect(result.code).toBe(1);
     expect(result.stdout).toContain("::error::");
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET /repos/o/r/issues/5/comments?per_page=100", "POST /graphql"]);
+  });
+
+  it("removes duplicates of its own comment, even one a parallel run already removed", async () => {
+    existing = [
+      { id: 9, body: marker },
+      { id: 3, body: marker, mine: false },
+      { id: 10, body: marker, goneOnDelete: true },
+      { id: 11, body: marker },
+    ];
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "new", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls.map((c) => `${c.method} ${c.url}`).slice(2)).toEqual([
+      "PATCH /repos/o/r/issues/comments/9",
+      "DELETE /repos/o/r/issues/comments/10",
+      "DELETE /repos/o/r/issues/comments/11",
+    ]);
+    expect(readFileCommands("output").id).toBe("9");
+  });
+
+  it("delete removes every comment of its own with the tag, and only those", async () => {
+    existing = [{ id: 9, body: marker }, { id: 3, body: marker, mine: false }, { id: 11, body: marker }];
+    const result = await runDist("dist/index.js", { ...baseInputs, mode: "delete", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => c.url)).toEqual([
+      "/repos/o/r/issues/comments/9",
+      "/repos/o/r/issues/comments/11",
+    ]);
+  });
+
+  it("neutralizes another tag's marker in the message", async () => {
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "hi <!-- actions-pr-comment:other -->", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls[1].body?.body).toBe(`hi <!-- actions-pr-comment\u200b:other -->\n\n${marker}`);
+  });
+
+  it("truncates a body over GitHub's size limit and warns", async () => {
+    fs.writeFileSync(path.join(tmp, "big.md"), "é".repeat(300_000));
+    const result = await runDist("dist/index.js", { ...baseInputs, "file-path": path.join(tmp, "big.md"), "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    const posted = calls[1].body?.body ?? "";
+    expect(Buffer.byteLength(posted)).toBeLessThanOrEqual(262_144);
+    expect(posted.endsWith(marker)).toBe(true);
+    expect(posted).not.toContain("�");
+    expect(result.stdout).toContain("::warning::The comment body is larger than GitHub's limit");
   });
 
   it("does not delete a tagged comment planted by someone else", async () => {

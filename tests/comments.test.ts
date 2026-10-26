@@ -30,22 +30,22 @@ function fakeOctokit(comments: any[] = [], authored: (nodeId: string) => boolean
 }
 
 describe("CommentsApi", () => {
-  it("find returns the first comment carrying the tag", async () => {
+  it("findAll returns the tagged comments", async () => {
     const oct = fakeOctokit([
       { id: 1, body: "nope", html_url: "u1" },
       { id: 2, body: "x\n\n<!-- actions-pr-comment:t -->", html_url: "u2" },
     ]);
     const api = createCommentsApi(oct as any, target);
-    expect(await api.find("t")).toEqual({ id: 2, body: expect.any(String), htmlUrl: "u2" });
+    expect(await api.findAll("t")).toEqual([{ id: 2, body: expect.any(String), htmlUrl: "u2" }]);
   });
 
-  it("find returns null when no comment matches", async () => {
+  it("findAll returns nothing when no comment matches", async () => {
     const oct = fakeOctokit([{ id: 1, body: "x", html_url: "u" }]);
-    expect(await createCommentsApi(oct as any, target).find("t")).toBeNull();
+    expect(await createCommentsApi(oct as any, target).findAll("t")).toEqual([]);
     expect(oct.graphql).not.toHaveBeenCalled();
   });
 
-  it("find skips a tagged comment planted by someone else", async () => {
+  it("findAll skips a tagged comment planted by someone else", async () => {
     const oct = fakeOctokit(
       [
         { id: 1, node_id: "FOREIGN", body: marker, html_url: "u1" },
@@ -53,13 +53,13 @@ describe("CommentsApi", () => {
       ],
       (id) => id === "MINE",
     );
-    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(2);
+    expect((await createCommentsApi(oct as any, target).findAll("t")).map((c) => c.id)).toEqual([2]);
     expect(oct.graphql).toHaveBeenCalledWith(expect.stringContaining("viewerDidAuthor"), { ids: ["FOREIGN", "MINE"] });
   });
 
-  it("find returns null when every tagged comment belongs to someone else", async () => {
+  it("findAll returns nothing when every tagged comment belongs to someone else", async () => {
     const oct = fakeOctokit([{ id: 1, node_id: "FOREIGN", body: marker, html_url: "u" }], () => false);
-    expect(await createCommentsApi(oct as any, target).find("t")).toBeNull();
+    expect(await createCommentsApi(oct as any, target).findAll("t")).toEqual([]);
   });
 
   // Shape of @octokit/graphql's GraphqlResponseError: it throws whenever the response has `errors`.
@@ -69,41 +69,41 @@ describe("CommentsApi", () => {
       data: { nodes },
     });
 
-  it("find skips a tagged comment deleted after listing (NOT_FOUND) and keeps checking", async () => {
+  it("findAll skips a tagged comment deleted after listing (NOT_FOUND) and keeps checking", async () => {
     const oct = fakeOctokit([
       { id: 1, node_id: "GONE", body: marker, html_url: "u1" },
       { id: 2, node_id: "MINE", body: marker, html_url: "u2" },
     ]);
     oct.graphql.mockRejectedValueOnce(graphqlError(["NOT_FOUND"], [null, { viewerDidAuthor: true }]));
-    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(2);
+    expect((await createCommentsApi(oct as any, target).findAll("t")).map((c) => c.id)).toEqual([2]);
   });
 
-  it("find fails instead of guessing when GitHub refuses the authorship check", async () => {
+  it("findAll fails instead of guessing when GitHub refuses the authorship check", async () => {
     const oct = fakeOctokit([{ id: 1, node_id: "MINE", body: marker, html_url: "u" }]);
     oct.graphql.mockRejectedValueOnce(graphqlError(["NOT_FOUND", "FORBIDDEN"], [null]));
-    await expect(createCommentsApi(oct as any, target).find("t")).rejects.toThrow(/response errors/);
+    await expect(createCommentsApi(oct as any, target).findAll("t")).rejects.toThrow(/response errors/);
   });
 
-  it("find fails on a transport error", async () => {
+  it("findAll fails on a transport error", async () => {
     const oct = fakeOctokit([{ id: 1, node_id: "MINE", body: marker, html_url: "u" }]);
     oct.graphql.mockRejectedValueOnce(new Error("socket hang up"));
-    await expect(createCommentsApi(oct as any, target).find("t")).rejects.toThrow("socket hang up");
+    await expect(createCommentsApi(oct as any, target).findAll("t")).rejects.toThrow("socket hang up");
   });
 
-  it("find checks authorship only for tagged comments, 100 per query", async () => {
+  it("findAll checks authorship only for tagged comments, 100 per query", async () => {
     const tagged = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, node_id: `N${i + 1}`, body: marker, html_url: "u" }));
     const oct = fakeOctokit([{ id: 999, node_id: "UNTAGGED", body: "x", html_url: "u" }, ...tagged], (id) => id === "N150");
 
-    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(150);
+    expect((await createCommentsApi(oct as any, target).findAll("t")).map((c) => c.id)).toEqual([150]);
     expect(oct.graphql.mock.calls.map(([, vars]) => vars.ids.length)).toEqual([100, 50]);
     expect(oct.graphql.mock.calls[0][1].ids).not.toContain("UNTAGGED");
   });
 
-  it("find stops querying once an authored comment is found", async () => {
+  it("findAll returns every authored comment across batches, oldest first", async () => {
     const tagged = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, node_id: `N${i + 1}`, body: marker, html_url: "u" }));
-    const oct = fakeOctokit(tagged, (id) => id === "N3");
-    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(3);
-    expect(oct.graphql).toHaveBeenCalledTimes(1);
+    const oct = fakeOctokit(tagged, (id) => id === "N3" || id === "N150");
+    expect((await createCommentsApi(oct as any, target).findAll("t")).map((c) => c.id)).toEqual([3, 150]);
+    expect(oct.graphql).toHaveBeenCalledTimes(2);
   });
 
   it("create maps html_url to htmlUrl", async () => {
@@ -123,9 +123,9 @@ describe("CommentsApi", () => {
     expect(oct.rest.reactions.createForIssueComment).toHaveBeenCalledTimes(2);
   });
 
-  it("find paginates all comments on the target issue", async () => {
+  it("findAll paginates all comments on the target issue", async () => {
     const oct = fakeOctokit();
-    await createCommentsApi(oct as any, target).find("t");
+    await createCommentsApi(oct as any, target).findAll("t");
     expect(oct.paginate).toHaveBeenCalledWith(oct.rest.issues.listComments, {
       owner: "o",
       repo: "r",
@@ -134,17 +134,17 @@ describe("CommentsApi", () => {
     });
   });
 
-  it("find skips comments without a body", async () => {
+  it("findAll skips comments without a body", async () => {
     const oct = fakeOctokit([
       { id: 1, body: null, html_url: "u1" },
       { id: 2, body: "<!-- actions-pr-comment:t -->", html_url: "u2" },
     ]);
-    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(2);
+    expect((await createCommentsApi(oct as any, target).findAll("t")).map((c) => c.id)).toEqual([2]);
   });
 
-  it("find does not match a tag that only shares a prefix", async () => {
+  it("findAll does not match a tag that only shares a prefix", async () => {
     const oct = fakeOctokit([{ id: 1, body: "<!-- actions-pr-comment:tag-2 -->", html_url: "u" }]);
-    expect(await createCommentsApi(oct as any, target).find("tag")).toBeNull();
+    expect(await createCommentsApi(oct as any, target).findAll("tag")).toEqual([]);
   });
 
   it("create posts to the target issue", async () => {
@@ -163,6 +163,33 @@ describe("CommentsApi", () => {
     const oct = fakeOctokit();
     await createCommentsApi(oct as any, target).remove(7);
     expect(oct.rest.issues.deleteComment).toHaveBeenCalledWith({ owner: "o", repo: "r", comment_id: 7 });
+  });
+
+  it("remove treats an already-deleted comment as removed", async () => {
+    const oct = fakeOctokit();
+    oct.rest.issues.deleteComment.mockRejectedValueOnce(Object.assign(new Error("Not Found"), { status: 404 }));
+    await expect(createCommentsApi(oct as any, target).remove(7)).resolves.toBeUndefined();
+  });
+
+  it("findAll ignores a comment of its own account that only mentions the marker mid-body", async () => {
+    const oct = fakeOctokit([
+      { id: 1, node_id: "QUOTE", body: `quoting ${marker} here`, html_url: "u1" },
+      { id: 2, node_id: "MINE", body: `x\n\n${marker}`, html_url: "u2" },
+    ]);
+    expect((await createCommentsApi(oct as any, target).findAll("t")).map((c) => c.id)).toEqual([2]);
+    expect(oct.graphql).toHaveBeenCalledWith(expect.any(String), { ids: ["MINE"] });
+  });
+
+  it("remove rethrows a non-object error unchanged", async () => {
+    const oct = fakeOctokit();
+    oct.rest.issues.deleteComment.mockRejectedValueOnce(null);
+    await expect(createCommentsApi(oct as any, target).remove(7)).rejects.toBeNull();
+  });
+
+  it("remove still fails on other errors", async () => {
+    const oct = fakeOctokit();
+    oct.rest.issues.deleteComment.mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+    await expect(createCommentsApi(oct as any, target).remove(7)).rejects.toThrow("Forbidden");
   });
 
   it("addReactions sends each reaction in order", async () => {
