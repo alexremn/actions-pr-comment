@@ -19,7 +19,7 @@ All source lives in `src/` as small, single-purpose modules:
 | `config.ts` | Parse and validate all action inputs into a typed config object |
 | `context.ts` | Resolve the pull request number from the event context |
 | `tag.ts` | Build and parse the hidden `<!-- actions-pr-comment:TAG -->` marker |
-| `comments.ts` | GitHub API calls: list, create, update, delete, add reactions |
+| `comments.ts` | GitHub API calls: list, create, update, delete, add reactions. `find` only matches comments the token's account wrote (GraphQL `viewerDidAuthor`) |
 | `modes.ts` | Orchestrate the four modes (upsert / recreate / delete / delete-on-completion) |
 | `outputs.ts` | Set action outputs (`id`, `body`, `html-url`) |
 | `state.ts` | Persist data between the main step and the post step via `@actions/core` state |

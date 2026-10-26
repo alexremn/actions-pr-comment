@@ -18,11 +18,15 @@ interface Call {
   method: string;
   url: string;
   auth?: string;
-  body?: { body?: string; content?: string };
+  body?: { body?: string; content?: string; variables?: { ids: string[] } };
 }
 
 let calls: Call[] = [];
-let existing: { id: number; body: string }[] = [];
+// `mine: false` marks a comment some other account wrote (viewerDidAuthor false); `"deleted"` one
+// that is listed but gone by the time GraphQL is asked (null node + NOT_FOUND, like GitHub).
+let existing: { id: number; body: string; mine?: boolean | "deleted" }[] = [];
+// Makes GraphQL refuse every node, like a token without access.
+let graphqlForbidden = false;
 let server: http.Server;
 let apiUrl: string;
 let tmp: string;
@@ -35,7 +39,18 @@ function respond(req: http.IncomingMessage, res: http.ServerResponse, raw: strin
     res.end(data === undefined ? undefined : JSON.stringify(data));
   };
   const id = Number(call.url.match(/\/comments\/(\d+)/)?.[1]);
-  if (call.method === "GET") return send(200, existing.map((c) => ({ ...c, html_url: `https://gh/c/${c.id}` })));
+  if (call.method === "GET") {
+    return send(200, existing.map(({ id, body }) => ({ id, body, node_id: `IC_${id}`, html_url: `https://gh/c/${id}` })));
+  }
+  if (call.method === "POST" && call.url === "/graphql") {
+    const found = (call.body?.variables?.ids ?? []).map((nodeId) => existing.find((c) => `IC_${c.id}` === nodeId));
+    const unresolved = (c?: (typeof existing)[number]) => graphqlForbidden || c?.mine === "deleted";
+    const nodes = found.map((c) => (unresolved(c) ? null : { viewerDidAuthor: c?.mine !== false }));
+    const errors = found
+      .filter(unresolved)
+      .map(() => (graphqlForbidden ? { type: "FORBIDDEN", message: "Resource not accessible by integration" } : { type: "NOT_FOUND", message: "Could not resolve to a node" }));
+    return send(200, errors.length ? { data: { nodes }, errors } : { data: { nodes } });
+  }
   if (call.method === "POST" && call.url.endsWith("/reactions")) return send(201, { id: 1, content: call.body?.content });
   if (call.method === "POST") return send(201, { id: 100, body: call.body?.body, html_url: "https://gh/c/100" });
   if (call.method === "PATCH") return send(200, { id, body: call.body?.body, html_url: `https://gh/c/${id}` });
@@ -91,6 +106,7 @@ afterAll(async () => {
 beforeEach(() => {
   calls = [];
   existing = [];
+  graphqlForbidden = false;
   fs.writeFileSync(path.join(tmp, "output"), "");
   fs.writeFileSync(path.join(tmp, "state"), "");
 });
@@ -128,9 +144,58 @@ describe("dist bundles", () => {
     expect(result).toMatchObject({ code: 0 });
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       "GET /repos/o/r/issues/5/comments?per_page=100",
+      "POST /graphql",
       "PATCH /repos/o/r/issues/comments/9",
     ]);
     expect(readFileCommands("output").id).toBe("9");
+  });
+
+  it("ignores a tagged comment planted by someone else and creates its own", async () => {
+    existing = [{ id: 3, body: `spoofed\n\n${marker}`, mine: false }];
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "real", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET /repos/o/r/issues/5/comments?per_page=100",
+      "POST /graphql",
+      "POST /repos/o/r/issues/5/comments",
+    ]);
+    expect(calls[1].body?.variables).toEqual({ ids: ["IC_3"] });
+    expect(readFileCommands("output").id).toBe("100");
+  });
+
+  it("updates its own comment even when a planted one comes first", async () => {
+    existing = [{ id: 3, body: marker, mine: false }, { id: 9, body: `old\n\n${marker}` }];
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "new", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls.map((c) => `${c.method} ${c.url}`).slice(1)).toEqual(["POST /graphql", "PATCH /repos/o/r/issues/comments/9"]);
+  });
+
+  it("skips a tagged comment deleted between listing and the authorship check", async () => {
+    existing = [{ id: 3, body: marker, mine: "deleted" }, { id: 9, body: marker }];
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "new", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls.at(-1)).toMatchObject({ method: "PATCH", url: "/repos/o/r/issues/comments/9" });
+  });
+
+  it("fails without writing anything when GitHub refuses the authorship check", async () => {
+    existing = [{ id: 9, body: marker }];
+    graphqlForbidden = true;
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "new", "comment-tag": "t" });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("::error::");
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET /repos/o/r/issues/5/comments?per_page=100", "POST /graphql"]);
+  });
+
+  it("does not delete a tagged comment planted by someone else", async () => {
+    existing = [{ id: 3, body: marker, mine: false }];
+    const result = await runDist("dist/index.js", { ...baseInputs, mode: "delete", "comment-tag": "t" });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls.map((c) => c.method)).toEqual(["GET", "POST"]);
   });
 
   it("deletes the comment in the post step for delete-on-completion", async () => {

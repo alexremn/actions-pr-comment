@@ -27,7 +27,7 @@ inputs:
     description: Target pull request number. Defaults to the PR/issue from the event context.
     required: false
   comment-tag:
-    description: Hidden identifier used to find, update, or delete a previous comment.
+    description: Hidden identifier used to find, update, or delete a previous comment written by the same token's account.
     required: false
   mode:
     description: One of upsert, recreate, delete, delete-on-completion.

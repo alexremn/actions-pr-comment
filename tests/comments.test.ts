@@ -4,9 +4,15 @@ import { Target } from "../src/context.js";
 
 const target: Target = { owner: "o", repo: "r", issueNumber: 5 };
 
-function fakeOctokit(comments: any[] = []) {
+const marker = "<!-- actions-pr-comment:t -->";
+
+// `authored` decides viewerDidAuthor per GraphQL node id; by default the token wrote everything.
+function fakeOctokit(comments: any[] = [], authored: (nodeId: string) => boolean = () => true) {
   return {
     paginate: jest.fn(async () => comments),
+    graphql: jest.fn(async (_query: string, { ids }: { ids: string[] }) => ({
+      nodes: ids.map((id) => ({ viewerDidAuthor: authored(id) })),
+    })),
     rest: {
       issues: {
         listComments: jest.fn(),
@@ -34,8 +40,70 @@ describe("CommentsApi", () => {
   });
 
   it("find returns null when no comment matches", async () => {
-    const api = createCommentsApi(fakeOctokit([{ id: 1, body: "x", html_url: "u" }]) as any, target);
-    expect(await api.find("t")).toBeNull();
+    const oct = fakeOctokit([{ id: 1, body: "x", html_url: "u" }]);
+    expect(await createCommentsApi(oct as any, target).find("t")).toBeNull();
+    expect(oct.graphql).not.toHaveBeenCalled();
+  });
+
+  it("find skips a tagged comment planted by someone else", async () => {
+    const oct = fakeOctokit(
+      [
+        { id: 1, node_id: "FOREIGN", body: marker, html_url: "u1" },
+        { id: 2, node_id: "MINE", body: `x\n\n${marker}`, html_url: "u2" },
+      ],
+      (id) => id === "MINE",
+    );
+    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(2);
+    expect(oct.graphql).toHaveBeenCalledWith(expect.stringContaining("viewerDidAuthor"), { ids: ["FOREIGN", "MINE"] });
+  });
+
+  it("find returns null when every tagged comment belongs to someone else", async () => {
+    const oct = fakeOctokit([{ id: 1, node_id: "FOREIGN", body: marker, html_url: "u" }], () => false);
+    expect(await createCommentsApi(oct as any, target).find("t")).toBeNull();
+  });
+
+  // Shape of @octokit/graphql's GraphqlResponseError: it throws whenever the response has `errors`.
+  const graphqlError = (types: string[], nodes: unknown[]) =>
+    Object.assign(new Error("Request failed due to following response errors"), {
+      errors: types.map((type) => ({ type, message: type })),
+      data: { nodes },
+    });
+
+  it("find skips a tagged comment deleted after listing (NOT_FOUND) and keeps checking", async () => {
+    const oct = fakeOctokit([
+      { id: 1, node_id: "GONE", body: marker, html_url: "u1" },
+      { id: 2, node_id: "MINE", body: marker, html_url: "u2" },
+    ]);
+    oct.graphql.mockRejectedValueOnce(graphqlError(["NOT_FOUND"], [null, { viewerDidAuthor: true }]));
+    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(2);
+  });
+
+  it("find fails instead of guessing when GitHub refuses the authorship check", async () => {
+    const oct = fakeOctokit([{ id: 1, node_id: "MINE", body: marker, html_url: "u" }]);
+    oct.graphql.mockRejectedValueOnce(graphqlError(["NOT_FOUND", "FORBIDDEN"], [null]));
+    await expect(createCommentsApi(oct as any, target).find("t")).rejects.toThrow(/response errors/);
+  });
+
+  it("find fails on a transport error", async () => {
+    const oct = fakeOctokit([{ id: 1, node_id: "MINE", body: marker, html_url: "u" }]);
+    oct.graphql.mockRejectedValueOnce(new Error("socket hang up"));
+    await expect(createCommentsApi(oct as any, target).find("t")).rejects.toThrow("socket hang up");
+  });
+
+  it("find checks authorship only for tagged comments, 100 per query", async () => {
+    const tagged = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, node_id: `N${i + 1}`, body: marker, html_url: "u" }));
+    const oct = fakeOctokit([{ id: 999, node_id: "UNTAGGED", body: "x", html_url: "u" }, ...tagged], (id) => id === "N150");
+
+    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(150);
+    expect(oct.graphql.mock.calls.map(([, vars]) => vars.ids.length)).toEqual([100, 50]);
+    expect(oct.graphql.mock.calls[0][1].ids).not.toContain("UNTAGGED");
+  });
+
+  it("find stops querying once an authored comment is found", async () => {
+    const tagged = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, node_id: `N${i + 1}`, body: marker, html_url: "u" }));
+    const oct = fakeOctokit(tagged, (id) => id === "N3");
+    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(3);
+    expect(oct.graphql).toHaveBeenCalledTimes(1);
   });
 
   it("create maps html_url to htmlUrl", async () => {
