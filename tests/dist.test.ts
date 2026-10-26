@@ -9,7 +9,10 @@ import * as path from "path";
 // Smoke-tests the committed bundles against a fake GitHub API. Unit tests mock
 // @actions/*, so only this catches a dependency or bundler bump that breaks dist/.
 
-jest.setTimeout(30_000);
+// Generous: a cold bundle start on a saturated machine can take tens of seconds. The child
+// timeout stays below the test timeout so a hang fails with the child's output, not a bare timeout.
+const CHILD_TIMEOUT_MS = 45_000;
+jest.setTimeout(CHILD_TIMEOUT_MS * 2 + 15_000);
 
 interface Call {
   method: string;
@@ -51,9 +54,9 @@ function runDist(entry: string, inputs: Record<string, string>, extraEnv: Record
     ...extraEnv,
   };
   for (const [k, v] of Object.entries(inputs)) env[`INPUT_${k.toUpperCase()}`] = v;
-  return new Promise<{ code: number; stdout: string }>((resolve) => {
-    execFile(process.execPath, [path.resolve(entry)], { env, timeout: 20_000 }, (err, stdout) => {
-      resolve({ code: !err ? 0 : typeof err.code === "number" ? err.code : 1, stdout });
+  return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    execFile(process.execPath, [path.resolve(entry)], { env, timeout: CHILD_TIMEOUT_MS }, (err, stdout, stderr) => {
+      resolve({ code: !err ? 0 : typeof err.code === "number" ? err.code : 1, stdout, stderr });
     });
   });
 }
@@ -94,9 +97,9 @@ beforeEach(() => {
 
 describe("dist bundles", () => {
   it("creates a tagged comment with reactions and sets outputs", async () => {
-    const { code } = await runDist("dist/index.js", { ...baseInputs, message: "hello", "comment-tag": "t", reactions: "rocket,eyes" });
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "hello", "comment-tag": "t", reactions: "rocket,eyes" });
 
-    expect(code).toBe(0);
+    expect(result).toMatchObject({ code: 0 });
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       "GET /repos/o/r/issues/5/comments?per_page=100",
       "POST /repos/o/r/issues/5/comments",
@@ -110,11 +113,19 @@ describe("dist bundles", () => {
     expect(readFileCommands("state")).toEqual({});
   });
 
+  it("posts the contents of file-path", async () => {
+    fs.writeFileSync(path.join(tmp, "report.md"), "# Report");
+    const result = await runDist("dist/index.js", { ...baseInputs, "file-path": path.join(tmp, "report.md") });
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(calls[0]).toMatchObject({ method: "POST", url: "/repos/o/r/issues/5/comments", body: { body: "# Report" } });
+  });
+
   it("updates the existing tagged comment", async () => {
     existing = [{ id: 7, body: "unrelated" }, { id: 9, body: `old\n\n${marker}` }];
-    const { code } = await runDist("dist/index.js", { ...baseInputs, message: "new", "comment-tag": "t" });
+    const result = await runDist("dist/index.js", { ...baseInputs, message: "new", "comment-tag": "t" });
 
-    expect(code).toBe(0);
+    expect(result).toMatchObject({ code: 0 });
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       "GET /repos/o/r/issues/5/comments?per_page=100",
       "PATCH /repos/o/r/issues/comments/9",
@@ -125,13 +136,13 @@ describe("dist bundles", () => {
   it("deletes the comment in the post step for delete-on-completion", async () => {
     const inputs = { ...baseInputs, mode: "delete-on-completion", message: "running", "comment-tag": "t" };
     const main = await runDist("dist/index.js", inputs);
-    expect(main.code).toBe(0);
+    expect(main).toMatchObject({ code: 0 });
     const state = readFileCommands("state");
     expect(state).toEqual({ "comment-id": "100" });
 
     calls = [];
     const post = await runDist("dist/cleanup/index.js", inputs, { "STATE_comment-id": state["comment-id"] });
-    expect(post.code).toBe(0);
+    expect(post).toMatchObject({ code: 0 });
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["DELETE /repos/o/r/issues/comments/100"]);
   });
 

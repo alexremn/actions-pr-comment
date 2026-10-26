@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as core from "@actions/core";
 
 export type Mode = "upsert" | "recreate" | "delete" | "delete-on-completion";
@@ -17,15 +18,38 @@ export interface Config {
   createIfNotExists: boolean;
 }
 
+// Checked-out PR code is attacker-controlled: a symlinked file or directory in it could point at
+// /proc/self/environ, .git/config or ~/.docker/config.json and leak secrets into the comment.
+// So no path component below the workspace may be a symlink. The workspace is matched by identity
+// (dev + inode), not by string, so path aliases and letter case cannot dodge the check. Above or
+// outside the workspace only the file itself is checked, so runner.temp, /tmp etc. keep working.
+function readBodyFile(filePath: string): string {
+  // Read the lexically normalized path so "dir/../x" cannot resolve through a symlinked dir.
+  const resolved = path.resolve(filePath);
+  const workspace = fs.statSync(process.env.GITHUB_WORKSPACE || process.cwd(), { bigint: true });
+  const { root } = path.parse(resolved);
+  let current = root;
+  let inWorkspace = false;
+  for (const part of path.relative(root, resolved).split(path.sep)) {
+    current = path.join(current, part);
+    if (fs.lstatSync(current).isSymbolicLink() && (inWorkspace || current === resolved)) {
+      throw new Error("symbolic links are not allowed");
+    }
+    if (!inWorkspace) {
+      const stat = fs.statSync(current, { bigint: true });
+      inWorkspace = stat.dev === workspace.dev && stat.ino === workspace.ino;
+    }
+  }
+  return fs.readFileSync(resolved, "utf8");
+}
+
 function resolveBody(message: string, filePath: string): string {
   if (message && filePath) {
     throw new Error("Only one of `message` or `file-path` may be set.");
   }
   if (filePath) {
     try {
-      // A checked-out PR could commit a symlink to /proc/self/environ or .git/config and leak tokens into the comment.
-      if (fs.lstatSync(filePath).isSymbolicLink()) throw new Error("symbolic links are not allowed");
-      return fs.readFileSync(filePath, "utf8");
+      return readBodyFile(filePath);
     } catch (err) {
       throw new Error(`Cannot read file-path "${filePath}": ${err instanceof Error ? err.message : String(err)}`);
     }

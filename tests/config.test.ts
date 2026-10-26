@@ -16,6 +16,15 @@ function withInputs(inputs: Record<string, string>, fn: () => void) {
   }
 }
 
+function withTempDir(fn: (dir: string) => void) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "prc-config-"));
+  try {
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 describe("parseConfig", () => {
   it("parses message + defaults", () => {
     withInputs({ message: "hi", "github-token": "t" }, () => {
@@ -139,6 +148,74 @@ describe("parseConfig", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("refuses a file under a symlinked directory in the workspace", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "ws"));
+      fs.mkdirSync(path.join(dir, "docker"));
+      fs.writeFileSync(path.join(dir, "docker", "config.json"), "SECRET");
+      fs.symlinkSync(path.join(dir, "docker"), path.join(dir, "ws", "deploy"));
+      withInputs({ "file-path": path.join(dir, "ws", "deploy", "config.json"), "github-token": "t" }, () => {
+        process.env.GITHUB_WORKSPACE = path.join(dir, "ws");
+        expect(() => parseConfig()).toThrow(/symbolic links are not allowed/);
+      });
+    });
+  });
+
+  it("does not follow `..` through a symlinked directory in the workspace", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "ws"));
+      fs.mkdirSync(path.join(dir, "home", ".docker"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "home", "config.json"), "SECRET");
+      fs.symlinkSync(path.join(dir, "home", ".docker"), path.join(dir, "ws", "deploy"));
+      withInputs({ "file-path": `${path.join(dir, "ws", "deploy")}/../config.json`, "github-token": "t" }, () => {
+        process.env.GITHUB_WORKSPACE = path.join(dir, "ws");
+        expect(() => parseConfig()).toThrow(/cannot read file-path/i);
+      });
+    });
+  });
+
+  it.each([
+    ["GITHUB_WORKSPACE", "alias", "real"],
+    ["file-path", "real", "alias"],
+  ])("refuses a symlinked directory when %s names the workspace through an alias", (_, wsName, fileName) => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "real"));
+      fs.mkdirSync(path.join(dir, "docker"));
+      fs.writeFileSync(path.join(dir, "docker", "config.json"), "SECRET");
+      fs.symlinkSync(path.join(dir, "docker"), path.join(dir, "real", "deploy"));
+      fs.symlinkSync(path.join(dir, "real"), path.join(dir, "alias"));
+      withInputs({ "file-path": path.join(dir, fileName, "deploy", "config.json"), "github-token": "t" }, () => {
+        process.env.GITHUB_WORKSPACE = path.join(dir, wsName);
+        expect(() => parseConfig()).toThrow(/symbolic links are not allowed/);
+      });
+    });
+  });
+
+  it("reads from a workspace that is itself reached through a symlink", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "real"));
+      fs.writeFileSync(path.join(dir, "real", "body.md"), "ok");
+      fs.symlinkSync(path.join(dir, "real"), path.join(dir, "ws"));
+      withInputs({ "file-path": path.join(dir, "ws", "body.md"), "github-token": "t" }, () => {
+        process.env.GITHUB_WORKSPACE = path.join(dir, "ws");
+        expect(parseConfig().body).toBe("ok");
+      });
+    });
+  });
+
+  it("reads through a symlinked directory outside the workspace (e.g. /tmp on macOS)", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "ws"));
+      fs.mkdirSync(path.join(dir, "private-tmp"));
+      fs.writeFileSync(path.join(dir, "private-tmp", "report.md"), "ok");
+      fs.symlinkSync(path.join(dir, "private-tmp"), path.join(dir, "tmp"));
+      withInputs({ "file-path": path.join(dir, "tmp", "report.md"), "github-token": "t" }, () => {
+        process.env.GITHUB_WORKSPACE = path.join(dir, "ws");
+        expect(parseConfig().body).toBe("ok");
+      });
+    });
   });
 
   it("keeps a valid comment-tag", () => {

@@ -28,7 +28,7 @@ jobs:
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `message` | Conditional | — | Comment body. Exactly one of `message` or `file-path` is required (except `delete` mode, which needs neither). |
-| `file-path` | Conditional | — | Path to a file whose contents become the comment body. Symbolic links are refused. |
+| `file-path` | Conditional | — | Path to a file whose contents become the comment body. The file must not be a symbolic link, and inside the workspace no directory on its path may be one either. |
 | `github-token` | No | `${{ github.token }}` | GitHub token used to read and write comments. |
 | `reactions` | No | — | Comma-separated reactions to add to the comment. Allowed values: `+1`, `-1`, `laugh`, `confused`, `heart`, `hooray`, `rocket`, `eyes`. |
 | `pr-number` | No | Event context | Target pull request number (positive integer). Defaults to the PR/issue number from the triggering event. |
