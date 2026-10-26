@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { createCommentsApi } from "./comments.js";
+import { parsePrNumber } from "./config.js";
 import { resolveTarget } from "./context.js";
 import { readCommentId } from "./state.js";
 
@@ -10,9 +11,7 @@ export async function cleanup(): Promise<void> {
 
   try {
     const token = core.getInput("github-token");
-    const prNumberRaw = core.getInput("pr-number");
-    const prNumber = prNumberRaw ? Number(prNumberRaw) : undefined;
-    const target = resolveTarget(prNumber && !Number.isNaN(prNumber) ? prNumber : undefined, github.context);
+    const target = resolveTarget(parsePrNumber(core.getInput("pr-number")), github.context);
     const api = createCommentsApi(github.getOctokit(token), target);
     await api.remove(id);
   } catch (err) {

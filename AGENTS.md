@@ -38,4 +38,5 @@ Any change to `src/` requires running `npm run build` and committing the regener
 ## Notes
 
 - The project is ESM-only (`"type": "module"`), because `@actions/core` v3 and `@actions/github` v9 ship ESM only. Relative imports need `.js` extensions, and tests mock modules with `jest.unstable_mockModule` + dynamic `import()` (see `tests/fixtures/core.ts`).
+- `tests/dist.test.ts` runs the committed `dist/` bundles against a fake GitHub API, so run `npm run build` before `npm test` after changing `src/` or bumping dependencies.
 - `docs/superpowers/` contains specs and planning documents used during development. It is gitignored and is not committed to the repository.

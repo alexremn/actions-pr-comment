@@ -82,6 +82,55 @@ describe("runMode", () => {
     expect(api.addReactions).toHaveBeenCalledWith(9, ["heart"]);
   });
 
+  it("upsert appends the hidden tag to the written body", async () => {
+    const api = fakeApi({ id: 9, body: "old", htmlUrl: "u" });
+    const res = await runMode(baseConfig(), api);
+    expect(api.find).toHaveBeenCalledWith("tag1");
+    expect(api.update).toHaveBeenCalledWith(9, "hello\n\n<!-- actions-pr-comment:tag1 -->");
+    expect(res).toEqual({ id: 9, body: "hello\n\n<!-- actions-pr-comment:tag1 -->", htmlUrl: "u" });
+  });
+
+  it("upsert without a comment-tag skips the lookup and always creates", async () => {
+    const api = fakeApi({ id: 9, body: "old", htmlUrl: "u" });
+    await runMode(baseConfig({ commentTag: undefined }), api);
+    expect(api.find).not.toHaveBeenCalled();
+    expect(api.update).not.toHaveBeenCalled();
+    expect(api.create).toHaveBeenCalledWith("hello");
+  });
+
+  it("recreate creates when nothing is found", async () => {
+    const api = fakeApi(null);
+    await runMode(baseConfig({ mode: "recreate" }), api);
+    expect(api.create).toHaveBeenCalled();
+    expect(api.remove).not.toHaveBeenCalled();
+  });
+
+  it("recreate creates even when create-if-not-exists is false", async () => {
+    const api = fakeApi(null);
+    await runMode(baseConfig({ mode: "recreate", createIfNotExists: false }), api);
+    expect(api.create).toHaveBeenCalled();
+  });
+
+  it("delete-on-completion updates the found comment like upsert", async () => {
+    const api = fakeApi({ id: 9, body: "old", htmlUrl: "u" });
+    const res = await runMode(baseConfig({ mode: "delete-on-completion" }), api);
+    expect(api.update).toHaveBeenCalled();
+    expect(res?.id).toBe(9);
+  });
+
+  it("delete-on-completion no-ops when not found and create-if-not-exists is false", async () => {
+    const api = fakeApi(null);
+    const res = await runMode(baseConfig({ mode: "delete-on-completion", createIfNotExists: false }), api);
+    expect(api.create).not.toHaveBeenCalled();
+    expect(res).toBeNull();
+  });
+
+  it("does not add reactions when none are configured", async () => {
+    const api = fakeApi(null);
+    await runMode(baseConfig(), api);
+    expect(api.addReactions).not.toHaveBeenCalled();
+  });
+
   it("warns and no-ops on delete without a comment-tag", async () => {
     const api = fakeApi(null);
     const res = await runMode(baseConfig({ mode: "delete", body: "", commentTag: undefined }), api);

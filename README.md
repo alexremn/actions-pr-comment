@@ -28,13 +28,13 @@ jobs:
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `message` | Conditional | — | Comment body. Exactly one of `message` or `file-path` is required (except `delete` mode, which needs neither). |
-| `file-path` | Conditional | — | Path to a file whose contents become the comment body. |
+| `file-path` | Conditional | — | Path to a file whose contents become the comment body. Symbolic links are refused. |
 | `github-token` | No | `${{ github.token }}` | GitHub token used to read and write comments. |
 | `reactions` | No | — | Comma-separated reactions to add to the comment. Allowed values: `+1`, `-1`, `laugh`, `confused`, `heart`, `hooray`, `rocket`, `eyes`. |
-| `pr-number` | No | Event context | Target pull request number. Defaults to the PR/issue number from the triggering event. |
-| `comment-tag` | No | — | Hidden identifier (`<!-- actions-pr-comment:TAG -->`) embedded in the comment to find, update, or delete a previous comment. |
+| `pr-number` | No | Event context | Target pull request number (positive integer). Defaults to the PR/issue number from the triggering event. |
+| `comment-tag` | No | — | Hidden identifier (`<!-- actions-pr-comment:TAG -->`) embedded in the comment to find, update, or delete a previous comment. Must not contain `-->`. |
 | `mode` | No | `upsert` | One of `upsert`, `recreate`, `delete`, `delete-on-completion`. |
-| `create-if-not-exists` | No | `true` | When the tagged comment is not found, create it (applies to `upsert` and `delete-on-completion`). |
+| `create-if-not-exists` | No | `true` | When the tagged comment is not found, create it (applies to `upsert` and `delete-on-completion`). `true` or `false`, case-insensitive; any other value is treated as `false` with a warning. |
 
 ## Outputs
 

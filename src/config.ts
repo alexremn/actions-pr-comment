@@ -23,6 +23,8 @@ function resolveBody(message: string, filePath: string): string {
   }
   if (filePath) {
     try {
+      // A checked-out PR could commit a symlink to /proc/self/environ or .git/config and leak tokens into the comment.
+      if (fs.lstatSync(filePath).isSymbolicLink()) throw new Error("symbolic links are not allowed");
       return fs.readFileSync(filePath, "utf8");
     } catch (err) {
       throw new Error(`Cannot read file-path "${filePath}": ${err instanceof Error ? err.message : String(err)}`);
@@ -42,6 +44,32 @@ function parseReactions(raw: string): Reaction[] {
   return items as Reaction[];
 }
 
+export function parsePrNumber(raw: string): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < 1) {
+    throw new Error(`Invalid pr-number "${raw}": must be a positive integer.`);
+  }
+  return n;
+}
+
+function parseCommentTag(raw: string): string | undefined {
+  // "-->" or "--!>" would close the hidden marker early and leak the rest of the tag into the comment.
+  if (/--!?>/.test(raw)) {
+    throw new Error(`Invalid comment-tag "${raw}": must not contain "-->".`);
+  }
+  return raw || undefined;
+}
+
+function parseCreateIfNotExists(raw: string): boolean {
+  if (!raw) return true;
+  const value = raw.toLowerCase();
+  if (value !== "true" && value !== "false") {
+    core.warning(`Invalid create-if-not-exists "${raw}": expected true or false. Treating it as false.`);
+  }
+  return value === "true";
+}
+
 export function parseConfig(): Config {
   const rawMode = core.getInput("mode") || "upsert";
   if (!VALID_MODES.includes(rawMode as Mode)) {
@@ -54,24 +82,13 @@ export function parseConfig(): Config {
     throw new Error("One of `message` or `file-path` is required for this mode.");
   }
 
-  const prNumberRaw = core.getInput("pr-number");
-  const createRaw = core.getInput("create-if-not-exists");
-
-  let prNumber: number | undefined;
-  if (prNumberRaw) {
-    prNumber = Number(prNumberRaw);
-    if (Number.isNaN(prNumber)) {
-      throw new Error(`Invalid pr-number "${prNumberRaw}": must be a number.`);
-    }
-  }
-
   return {
     token: core.getInput("github-token"),
     body,
     reactions: parseReactions(core.getInput("reactions")),
-    prNumber,
-    commentTag: core.getInput("comment-tag") || undefined,
+    prNumber: parsePrNumber(core.getInput("pr-number")),
+    commentTag: parseCommentTag(core.getInput("comment-tag")),
     mode,
-    createIfNotExists: createRaw ? createRaw === "true" : true,
+    createIfNotExists: parseCreateIfNotExists(core.getInput("create-if-not-exists")),
   };
 }

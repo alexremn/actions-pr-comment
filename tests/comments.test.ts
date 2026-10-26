@@ -54,4 +54,55 @@ describe("CommentsApi", () => {
     await api.addReactions(7, ["+1", "rocket"]);
     expect(oct.rest.reactions.createForIssueComment).toHaveBeenCalledTimes(2);
   });
+
+  it("find paginates all comments on the target issue", async () => {
+    const oct = fakeOctokit();
+    await createCommentsApi(oct as any, target).find("t");
+    expect(oct.paginate).toHaveBeenCalledWith(oct.rest.issues.listComments, {
+      owner: "o",
+      repo: "r",
+      issue_number: 5,
+      per_page: 100,
+    });
+  });
+
+  it("find skips comments without a body", async () => {
+    const oct = fakeOctokit([
+      { id: 1, body: null, html_url: "u1" },
+      { id: 2, body: "<!-- actions-pr-comment:t -->", html_url: "u2" },
+    ]);
+    expect((await createCommentsApi(oct as any, target).find("t"))?.id).toBe(2);
+  });
+
+  it("find does not match a tag that only shares a prefix", async () => {
+    const oct = fakeOctokit([{ id: 1, body: "<!-- actions-pr-comment:tag-2 -->", html_url: "u" }]);
+    expect(await createCommentsApi(oct as any, target).find("tag")).toBeNull();
+  });
+
+  it("create posts to the target issue", async () => {
+    const oct = fakeOctokit();
+    await createCommentsApi(oct as any, target).create("hi");
+    expect(oct.rest.issues.createComment).toHaveBeenCalledWith({ owner: "o", repo: "r", issue_number: 5, body: "hi" });
+  });
+
+  it("create maps a null body to an empty string", async () => {
+    const oct = fakeOctokit();
+    oct.rest.issues.createComment.mockResolvedValueOnce({ data: { id: 1, body: null, html_url: "u" } });
+    expect((await createCommentsApi(oct as any, target).create("hi")).body).toBe("");
+  });
+
+  it("remove deletes the comment by id", async () => {
+    const oct = fakeOctokit();
+    await createCommentsApi(oct as any, target).remove(7);
+    expect(oct.rest.issues.deleteComment).toHaveBeenCalledWith({ owner: "o", repo: "r", comment_id: 7 });
+  });
+
+  it("addReactions sends each reaction in order", async () => {
+    const oct = fakeOctokit();
+    await createCommentsApi(oct as any, target).addReactions(7, ["heart", "eyes"]);
+    expect(oct.rest.reactions.createForIssueComment.mock.calls).toEqual([
+      [{ owner: "o", repo: "r", comment_id: 7, content: "heart" }],
+      [{ owner: "o", repo: "r", comment_id: 7, content: "eyes" }],
+    ]);
+  });
 });

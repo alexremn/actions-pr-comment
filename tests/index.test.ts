@@ -50,4 +50,27 @@ describe("run", () => {
     await run();
     expect(saveCommentId).not.toHaveBeenCalled();
   });
+
+  it("does not save state for other modes", async () => {
+    parseConfig.mockReturnValue({ ...config, mode: "upsert" });
+    runMode.mockResolvedValue({ id: 7, body: "b", htmlUrl: "u" });
+    await run();
+    expect(setOutputs).toHaveBeenCalled();
+    expect(saveCommentId).not.toHaveBeenCalled();
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
+  it("fails the action when the API call rejects", async () => {
+    parseConfig.mockReturnValue(config);
+    runMode.mockRejectedValue(new Error("Resource not accessible by integration"));
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith("Resource not accessible by integration");
+    expect(saveCommentId).not.toHaveBeenCalled();
+  });
+
+  it("stringifies non-Error failures", async () => {
+    parseConfig.mockImplementation(() => { throw "nope"; });
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith("nope");
+  });
 });
